@@ -5,27 +5,66 @@ export default function VideoChat({ sessionId, username, isHost }) {
   const [muted, setMuted] = useState(false);
   const [sharingScreen, setSharingScreen] = useState(false);
   const [participants, setParticipants] = useState([]);
-  const [showParticipants, setShowParticipants] = useState(false);
+  const [showParticipants, setShowParticipants] = useState(true);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const videoRef = useRef();
   const router = useRouter();
 
   useEffect(() => {
-    // Teilnehmer simulieren (in echter App via WebRTC)
-    const mockParticipants = [
-      { id: 1, name: username, isHost: isHost, isYou: true, avatar: '🎥' },
-      { id: 2, name: 'Max Mustermann', isHost: false, isYou: false, avatar: '👤' },
-      { id: 3, name: 'Anna Schmidt', isHost: false, isYou: false, avatar: '👩' },
-    ];
+    // Alle Teilnehmer aus dem localStorage oder Session speichern
+    const storedParticipants = localStorage.getItem(`participants_${sessionId}`);
+    let allParticipants = [];
     
-    if (!isHost) {
-      mockParticipants.splice(1, 2);
+    if (storedParticipants) {
+      allParticipants = JSON.parse(storedParticipants);
     }
     
-    setParticipants(mockParticipants);
+    // Aktuellen Benutzer hinzufügen wenn nicht vorhanden
+    const currentUser = { 
+      id: Date.now(), 
+      name: username, 
+      isHost: isHost, 
+      isYou: true, 
+      avatar: '🎥',
+      joinedAt: new Date().toISOString()
+    };
+    
+    const userExists = allParticipants.some(p => p.name === username);
+    if (!userExists) {
+      allParticipants.push(currentUser);
+      localStorage.setItem(`participants_${sessionId}`, JSON.stringify(allParticipants));
+    }
+    
+    setParticipants(allParticipants);
 
-    // Canvas Platzhalter mit Animation
+    // Simuliere andere Teilnehmer für Demo (damit man sieht wie es aussieht)
+    if (isHost && allParticipants.length === 1) {
+      // Demo-Teilnehmer für Host
+      setTimeout(() => {
+        const demoParticipants = [
+          currentUser,
+          { id: Date.now() + 1, name: 'Gast123', isHost: false, isYou: false, avatar: '👤', joinedAt: new Date().toISOString() },
+          { id: Date.now() + 2, name: 'Anna_S', isHost: false, isYou: false, avatar: '👩', joinedAt: new Date().toISOString() }
+        ];
+        setParticipants(demoParticipants);
+        localStorage.setItem(`participants_${sessionId}`, JSON.stringify(demoParticipants));
+        addSystemMessage('👋 Neue Teilnehmer sind beigetreten!');
+      }, 2000);
+    } else if (!isHost && allParticipants.length === 1) {
+      // Demo-Teilnehmer für Gäste
+      setTimeout(() => {
+        const demoParticipants = [
+          { id: Date.now(), name: username, isHost: false, isYou: true, avatar: '🎥', joinedAt: new Date().toISOString() },
+          { id: Date.now() + 1, name: 'Host', isHost: true, isYou: false, avatar: '👑', joinedAt: new Date().toISOString() }
+        ];
+        setParticipants(demoParticipants);
+        localStorage.setItem(`participants_${sessionId}`, JSON.stringify(demoParticipants));
+        addSystemMessage('🎉 Du bist dem Chat beigetreten!');
+      }, 1000);
+    }
+
+    // Canvas Animation
     const canvas = document.createElement('canvas');
     canvas.width = 640;
     canvas.height = 480;
@@ -38,7 +77,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
       
       rotation += 0.01;
       
-      // Neon Gradient Background
       const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
       gradient.addColorStop(0, '#667eea');
       gradient.addColorStop(0.5, '#764ba2');
@@ -46,7 +84,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Neon Grid
       ctx.strokeStyle = 'rgba(255,255,255,0.2)';
       ctx.lineWidth = 1;
       for (let i = 0; i < canvas.width; i += 50) {
@@ -60,7 +97,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
         ctx.stroke();
       }
       
-      // Pulsing Circle
       const pulse = Math.sin(rotation * 2) * 10 + 50;
       ctx.shadowBlur = 20;
       ctx.shadowColor = '#fff';
@@ -69,7 +105,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
       ctx.fillStyle = 'rgba(255,255,255,0.1)';
       ctx.fill();
       
-      // Neon Text
       ctx.shadowBlur = 15;
       ctx.shadowColor = '#00ff00';
       ctx.font = 'bold 32px "Courier New", monospace';
@@ -109,9 +144,66 @@ export default function VideoChat({ sessionId, username, isHost }) {
     };
   }, [username, sessionId, isHost]);
 
+  const addSystemMessage = (text) => {
+    const newMessage = {
+      id: Date.now(),
+      user: 'System',
+      text: text,
+      isSystem: true,
+      timestamp: new Date().toLocaleTimeString()
+    };
+    setMessages(prev => [...prev, newMessage]);
+    setTimeout(() => {
+      const chatContainer = document.getElementById('chat-messages');
+      if (chatContainer) {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }
+    }, 100);
+  };
+
+  const sendMessage = () => {
+    if (message.trim()) {
+      const newMessage = {
+        id: Date.now(),
+        user: username,
+        text: message,
+        isSystem: false,
+        timestamp: new Date().toLocaleTimeString()
+      };
+      setMessages(prev => [...prev, newMessage]);
+      setMessage('');
+      
+      // Simuliere Antwort von anderen Teilnehmern
+      if (Math.random() > 0.7 && participants.length > 1) {
+        const randomParticipant = participants.find(p => !p.isYou);
+        if (randomParticipant) {
+          setTimeout(() => {
+            const replies = ['Ja! 👍', 'Cool 😎', 'Nice!', '👍👍👍', '🚀'];
+            const randomReply = replies[Math.floor(Math.random() * replies.length)];
+            const replyMessage = {
+              id: Date.now(),
+              user: randomParticipant.name,
+              text: randomReply,
+              isSystem: false,
+              timestamp: new Date().toLocaleTimeString()
+            };
+            setMessages(prev => [...prev, replyMessage]);
+          }, 1000);
+        }
+      }
+      
+      setTimeout(() => {
+        const chatContainer = document.getElementById('chat-messages');
+        if (chatContainer) {
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+      }, 100);
+    }
+  };
+
   const toggleMute = () => {
     setMuted(!muted);
-    addSystemMessage(muted ? 'Mikrofon aktiviert' : 'Mikrofon stummgeschaltet');
+    addSystemMessage(muted ? '🎤 Mikrofon aktiviert' : '🔇 Mikrofon stumm');
   };
 
   const toggleScreenShare = async () => {
@@ -130,14 +222,14 @@ export default function VideoChat({ sessionId, username, isHost }) {
         }
         
         setSharingScreen(true);
-        addSystemMessage('Screen Sharing gestartet');
+        addSystemMessage('📺 Screen Sharing gestartet');
         
         screen.getVideoTracks()[0].onended = () => {
           stopScreenShare();
         };
       } catch (err) {
         console.error('Screen Share Fehler:', err);
-        addSystemMessage('Screen Share wurde abgebrochen');
+        addSystemMessage('❌ Screen Share wurde abgebrochen');
       }
     } else {
       stopScreenShare();
@@ -145,52 +237,25 @@ export default function VideoChat({ sessionId, username, isHost }) {
   };
 
   const stopScreenShare = () => {
-    addSystemMessage('Screen Sharing beendet');
-    window.location.reload(); // Einfacher Neustart
-  };
-
-  const addSystemMessage = (text) => {
-    const newMessage = {
-      id: Date.now(),
-      user: 'System',
-      text: text,
-      isSystem: true,
-      timestamp: new Date().toLocaleTimeString()
-    };
-    setMessages(prev => [...prev, newMessage]);
-    setTimeout(() => {
-      setMessages(prev => prev.filter(m => m.id !== newMessage.id));
-    }, 3000);
-  };
-
-  const sendMessage = () => {
-    if (message.trim()) {
-      const newMessage = {
-        id: Date.now(),
-        user: username,
-        text: message,
-        isSystem: false,
-        timestamp: new Date().toLocaleTimeString()
-      };
-      setMessages(prev => [...prev, newMessage]);
-      setMessage('');
-      setTimeout(() => {
-        // Automatisch scrollen
-        const chatContainer = document.getElementById('chat-messages');
-        if (chatContainer) {
-          chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-      }, 100);
-    }
+    addSystemMessage('📺 Screen Sharing beendet');
+    window.location.reload();
   };
 
   const copySessionLink = () => {
     const link = window.location.href;
     navigator.clipboard.writeText(link);
-    addSystemMessage('✅ Link in Zwischenablage kopiert!');
+    addSystemMessage('✅ Session-Link kopiert!');
   };
 
   const leaveSession = () => {
+    // Teilnehmer aus Liste entfernen
+    const storedParticipants = localStorage.getItem(`participants_${sessionId}`);
+    if (storedParticipants) {
+      let allParticipants = JSON.parse(storedParticipants);
+      allParticipants = allParticipants.filter(p => p.name !== username);
+      localStorage.setItem(`participants_${sessionId}`, JSON.stringify(allParticipants));
+    }
+    
     if (videoRef.current && videoRef.current.srcObject) {
       const tracks = videoRef.current.srcObject.getTracks();
       tracks.forEach(track => track.stop());
@@ -200,9 +265,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
 
   return (
     <div style={styles.container}>
-      {/* Neon Glow Effect */}
-      <div style={styles.neonGlow}></div>
-      
       <div style={styles.header}>
         <div style={styles.headerLeft}>
           <div style={styles.neonLogo}>🎥 VC</div>
@@ -219,19 +281,18 @@ export default function VideoChat({ sessionId, username, isHost }) {
         <div style={styles.headerRight}>
           <button 
             onClick={() => setShowParticipants(!showParticipants)} 
-            style={styles.iconButton(showParticipants ? '#667eea' : '#2c3e50')}
+            style={styles.iconButton}
             title="Teilnehmer"
           >
             👥 {participants.length}
           </button>
-          <button onClick={copySessionLink} style={styles.iconButton('#2c3e50')} title="Link kopieren">
+          <button onClick={copySessionLink} style={styles.iconButton} title="Link kopieren">
             🔗
           </button>
         </div>
       </div>
 
       <div style={styles.mainContent}>
-        {/* Video Bereich */}
         <div style={styles.videoSection}>
           <div style={styles.videoCard}>
             <video
@@ -251,11 +312,10 @@ export default function VideoChat({ sessionId, username, isHost }) {
             </div>
           </div>
           
-          {/* Control Buttons */}
           <div style={styles.controls}>
             <button 
               onClick={toggleMute} 
-              style={styles.controlButton(muted ? '#e74c3c' : '#2ecc71', muted)}
+              style={styles.controlButton(muted ? '#e74c3c' : '#2ecc71')}
               title={muted ? "Mikrofon an" : "Mikrofon aus"}
             >
               {muted ? '🔇' : '🎤'}
@@ -263,7 +323,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
             
             <button 
               onClick={toggleScreenShare} 
-              style={styles.controlButton(sharingScreen ? '#e67e22' : '#3498db', sharingScreen)}
+              style={styles.controlButton(sharingScreen ? '#e67e22' : '#3498db')}
               title={sharingScreen ? "Screen Share stoppen" : "Screen Share starten"}
             >
               🖥️
@@ -271,7 +331,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
             
             <button 
               onClick={copySessionLink} 
-              style={styles.controlButton('#9b59b6', false)}
+              style={styles.controlButton('#9b59b6')}
               title="Link kopieren"
             >
               🔗
@@ -279,7 +339,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
             
             <button 
               onClick={leaveSession} 
-              style={styles.controlButton('#e74c3c', false)}
+              style={styles.controlButton('#e74c3c')}
               title="Verlassen"
             >
               🚪
@@ -287,16 +347,14 @@ export default function VideoChat({ sessionId, username, isHost }) {
           </div>
         </div>
 
-        {/* Teilnehmer & Chat Bereich */}
         <div style={styles.sidebar}>
-          {/* Teilnehmer Liste */}
           {showParticipants && (
             <div style={styles.participantsPanel}>
               <h3 style={styles.panelTitle}>
                 👥 Teilnehmer ({participants.length})
               </h3>
-              {participants.map(p => (
-                <div key={p.id} style={styles.participantItem}>
+              {participants.map((p, idx) => (
+                <div key={idx} style={styles.participantItem}>
                   <div style={styles.participantAvatar}>{p.avatar}</div>
                   <div style={styles.participantInfo}>
                     <span style={styles.participantName}>
@@ -312,12 +370,16 @@ export default function VideoChat({ sessionId, username, isHost }) {
             </div>
           )}
           
-          {/* Chat Bereich */}
           <div style={styles.chatPanel}>
             <h3 style={styles.panelTitle}>
-              💬 Chat
+              💬 Chat ({messages.length})
             </h3>
             <div id="chat-messages" style={styles.chatMessages}>
+              {messages.length === 0 && (
+                <div style={styles.emptyChat}>
+                  💬 Keine Nachrichten yet
+                </div>
+              )}
               {messages.map(msg => (
                 <div key={msg.id} style={msg.isSystem ? styles.systemMessage : styles.userMessage}>
                   <div style={styles.messageHeader}>
@@ -353,19 +415,7 @@ const styles = {
     minHeight: '100vh',
     background: 'linear-gradient(135deg, #0a0a2a 0%, #1a0033 100%)',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    position: 'relative',
-    overflow: 'hidden'
-  },
-  neonGlow: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: '50%',
-    height: '50%',
-    background: 'radial-gradient(circle, rgba(102,126,234,0.3) 0%, rgba(0,0,0,0) 70%)',
-    transform: 'translate(-50%, -50%)',
-    pointerEvents: 'none',
-    animation: 'pulse 4s ease-in-out infinite'
+    position: 'relative'
   },
   header: {
     background: 'rgba(0,0,0,0.5)',
@@ -374,9 +424,7 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderBottom: '1px solid rgba(102,126,234,0.3)',
-    position: 'relative',
-    zIndex: 10
+    borderBottom: '1px solid rgba(102,126,234,0.3)'
   },
   headerLeft: {
     display: 'flex',
@@ -392,8 +440,7 @@ const styles = {
     fontWeight: 'bold',
     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
     WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-    textShadow: '0 0 30px rgba(102,126,234,0.5)'
+    WebkitTextFillColor: 'transparent'
   },
   sessionTitle: {
     color: 'white',
@@ -417,25 +464,21 @@ const styles = {
     fontSize: '10px',
     marginLeft: '8px'
   },
-  iconButton: (bgColor) => ({
-    background: bgColor,
+  iconButton: {
+    background: '#2c3e50',
     border: 'none',
     borderRadius: '10px',
     padding: '8px 12px',
     color: 'white',
     cursor: 'pointer',
-    fontSize: '14px',
-    transition: 'all 0.3s ease',
-    backdropFilter: 'blur(10px)'
-  }),
+    fontSize: '14px'
+  },
   mainContent: {
     display: 'grid',
     gridTemplateColumns: '1fr 320px',
     gap: '20px',
     padding: '20px',
-    height: 'calc(100vh - 80px)',
-    position: 'relative',
-    zIndex: 5
+    height: 'calc(100vh - 80px)'
   },
   videoSection: {
     display: 'flex',
@@ -448,8 +491,7 @@ const styles = {
     borderRadius: '20px',
     overflow: 'hidden',
     aspectRatio: '16/9',
-    boxShadow: '0 0 30px rgba(102,126,234,0.3)',
-    animation: 'glow 2s ease-in-out infinite'
+    boxShadow: '0 0 30px rgba(102,126,234,0.3)'
   },
   video: {
     width: '100%',
@@ -476,8 +518,7 @@ const styles = {
     padding: '2px 8px',
     borderRadius: '4px',
     fontSize: '10px',
-    fontWeight: 'bold',
-    animation: 'pulse 1.5s ease-in-out infinite'
+    fontWeight: 'bold'
   },
   mutedBadge: {
     background: '#e74c3c',
@@ -502,17 +543,15 @@ const styles = {
     margin: '0 auto',
     width: 'fit-content'
   },
-  controlButton: (bgColor, isActive) => ({
+  controlButton: (bgColor) => ({
     width: '60px',
     height: '60px',
     borderRadius: '50%',
     backgroundColor: bgColor,
-    border: isActive ? '2px solid white' : 'none',
+    border: 'none',
     fontSize: '24px',
     cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    boxShadow: `0 0 20px ${bgColor}`,
-    animation: isActive ? 'pulse 2s infinite' : 'none'
+    transition: 'transform 0.2s'
   }),
   sidebar: {
     display: 'flex',
@@ -525,7 +564,8 @@ const styles = {
     borderRadius: '15px',
     padding: '15px',
     border: '1px solid rgba(102,126,234,0.3)',
-    animation: 'slideIn 0.3s ease-out'
+    maxHeight: '300px',
+    overflowY: 'auto'
   },
   chatPanel: {
     background: 'rgba(0,0,0,0.5)',
@@ -550,7 +590,7 @@ const styles = {
     gap: '10px',
     padding: '8px',
     borderRadius: '8px',
-    transition: 'all 0.3s ease'
+    marginBottom: '5px'
   },
   participantAvatar: {
     width: '32px',
@@ -587,14 +627,19 @@ const styles = {
     height: '8px',
     background: '#2ecc71',
     borderRadius: '50%',
-    display: 'inline-block',
-    animation: 'pulse 2s infinite'
+    display: 'inline-block'
   },
   chatMessages: {
     flex: 1,
     overflowY: 'auto',
     marginBottom: '15px',
-    maxHeight: '300px'
+    maxHeight: '400px'
+  },
+  emptyChat: {
+    textAlign: 'center',
+    color: '#aaa',
+    padding: '20px',
+    fontSize: '12px'
   },
   systemMessage: {
     background: 'rgba(102,126,234,0.2)',
@@ -649,38 +694,3 @@ const styles = {
     fontSize: '16px'
   }
 };
-
-// CSS Animations (füge das in eine globale CSS-Datei oder style Tag ein)
-const globalStyles = `
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.8; transform: scale(1.05); }
-}
-
-@keyframes glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(102,126,234,0.3); }
-  50% { box-shadow: 0 0 40px rgba(102,126,234,0.6); }
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-`;
-
-if (typeof document !== 'undefined') {
-  const style = document.createElement('style');
-  style.textContent = globalStyles;
-  document.head.appendChild(style);
-}
