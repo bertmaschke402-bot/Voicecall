@@ -1,0 +1,119 @@
+import { useState } from 'react';
+import { useRouter } from 'next/router';
+
+export default function Home() {
+  const [sessionName, setSessionName] = useState('');
+  const [username, setUsername] = useState('');
+  const router = useRouter();
+
+  const createSession = () => {
+    if (username.trim()) {
+      const sessionId = Math.random().toString(36).substring(2, 8);
+      router.push(`/${sessionId}?username=${encodeURIComponent(username)}&host=true`);
+    }
+  };
+
+  const joinSession = () => {
+    if (sessionName.trim() && username.trim()) {
+      router.push(`/${sessionName}?username=${encodeURIComponent(username)}`);
+    }
+  };
+
+  return (
+    <div style={styles.container}>
+      <div style={styles.card}>
+        <h1 style={styles.title}>🎥 Video Chat App</h1>
+        
+        <div style={styles.section}>
+          <h2>Session erstellen</h2>
+          <input
+            type="text"
+            placeholder="Dein Name"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            style={styles.input}
+          />
+          <button onClick={createSession} style={styles.button}>
+            Neue Session erstellen
+          </button>
+        </div>
+
+        <div style={styles.divider}>oder</div>
+
+        <div style={styles.section}>
+          <h2>Session beitreten</h2>
+          <input
+            type="text"
+            placeholder="Session Code"
+            value={sessionName}
+            onChange={(e) => setSessionName(e.target.value)}
+            style={styles.input}
+          />
+          <input
+            type="text"
+            placeholder="Dein Name"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            style={styles.input}
+          />
+          <button onClick={joinSession} style={styles.button}>
+            Session beitreten
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  container: {
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    fontFamily: 'Arial, sans-serif'
+  },
+  card: {
+    background: 'white',
+    padding: '40px',
+    borderRadius: '20px',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    maxWidth: '400px',
+    width: '90%'
+  },
+  title: {
+    textAlign: 'center',
+    color: '#333',
+    marginBottom: '30px'
+  },
+  section: {
+    marginBottom: '20px'
+  },
+  input: {
+    width: '100%',
+    padding: '12px',
+    margin: '10px 0',
+    border: '1px solid #ddd',
+    borderRadius: '8px',
+    fontSize: '16px',
+    boxSizing: 'border-box'
+  },
+  button: {
+    width: '100%',
+    padding: '12px',
+    backgroundColor: '#667eea',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '16px',
+    cursor: 'pointer',
+    marginTop: '10px',
+    transition: 'background 0.3s'
+  },
+  divider: {
+    textAlign: 'center',
+    margin: '20px 0',
+    color: '#999'
+  }
+};
