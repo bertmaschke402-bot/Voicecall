@@ -8,7 +8,9 @@ export default function Home() {
 
   const createSession = () => {
     if (username.trim()) {
+      // Generiere zufällige Session ID
       const sessionId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      // Speichere in URL und geh direkt zur Session
       router.push(`/${sessionId}?username=${encodeURIComponent(username)}&host=true`);
     } else {
       alert('Bitte gib deinen Namen ein');
@@ -17,6 +19,7 @@ export default function Home() {
 
   const joinSession = () => {
     if (sessionName.trim() && username.trim()) {
+      // Direkt zur Session gehen - kein Check nötig
       router.push(`/${sessionName.toUpperCase()}?username=${encodeURIComponent(username)}`);
     } else {
       alert('Bitte gib Session-Code und Namen ein');
@@ -27,7 +30,7 @@ export default function Home() {
     <div style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.title}>🎥 Video Chat</h1>
-        <p style={styles.subtitle}>Einfacher Video-Chat mit Screen-Sharing</p>
+        <p style={styles.subtitle}>Teile den Link mit Freunden!</p>
         
         <div style={styles.section}>
           <h2 style={styles.sectionTitle}>Neue Session starten</h2>
