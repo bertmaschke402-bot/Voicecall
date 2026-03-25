@@ -1,148 +1,128 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
+import io from 'socket.io-client';
+import Peer from 'simple-peer';
+
+let socket;
 
 export default function VideoChat({ sessionId, username, isHost }) {
+  const [peers, setPeers] = useState([]);
   const [muted, setMuted] = useState(false);
+  const [videoEnabled, setVideoEnabled] = useState(true);
   const [sharingScreen, setSharingScreen] = useState(false);
-  const [participants, setParticipants] = useState([]);
-  const [showParticipants, setShowParticipants] = useState(true);
+  const [stream, setStream] = useState(null);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
+  const [participants, setParticipants] = useState([]);
+  const [showParticipants, setShowParticipants] = useState(true);
   const videoRef = useRef();
+  const peersRef = useRef({});
   const router = useRouter();
 
+  // Eigene Kamera starten
   useEffect(() => {
-    // Alle Teilnehmer aus dem localStorage oder Session speichern
-    const storedParticipants = localStorage.getItem(`participants_${sessionId}`);
-    let allParticipants = [];
-    
-    if (storedParticipants) {
-      allParticipants = JSON.parse(storedParticipants);
-    }
-    
-    // Aktuellen Benutzer hinzufügen wenn nicht vorhanden
-    const currentUser = { 
-      id: Date.now(), 
-      name: username, 
-      isHost: isHost, 
-      isYou: true, 
-      avatar: '🎥',
-      joinedAt: new Date().toISOString()
-    };
-    
-    const userExists = allParticipants.some(p => p.name === username);
-    if (!userExists) {
-      allParticipants.push(currentUser);
-      localStorage.setItem(`participants_${sessionId}`, JSON.stringify(allParticipants));
-    }
-    
-    setParticipants(allParticipants);
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(myStream => {
+        setStream(myStream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = myStream;
+        }
+      })
+      .catch(err => {
+        console.error('Kamera Fehler:', err);
+        // Fallback zu Canvas wenn Kamera nicht funktioniert
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#667eea';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white';
+        ctx.font = '20px Arial';
+        ctx.fillText('📹 Kamera nicht verfügbar', 200, 240);
+        ctx.fillText(`Eingeloggt als: ${username}`, 200, 280);
+        const canvasStream = canvas.captureStream();
+        setStream(canvasStream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = canvasStream;
+        }
+      });
+  }, []);
 
-    // Simuliere andere Teilnehmer für Demo (damit man sieht wie es aussieht)
-    if (isHost && allParticipants.length === 1) {
-      // Demo-Teilnehmer für Host
-      setTimeout(() => {
-        const demoParticipants = [
-          currentUser,
-          { id: Date.now() + 1, name: 'Gast123', isHost: false, isYou: false, avatar: '👤', joinedAt: new Date().toISOString() },
-          { id: Date.now() + 2, name: 'Anna_S', isHost: false, isYou: false, avatar: '👩', joinedAt: new Date().toISOString() }
-        ];
-        setParticipants(demoParticipants);
-        localStorage.setItem(`participants_${sessionId}`, JSON.stringify(demoParticipants));
-        addSystemMessage('👋 Neue Teilnehmer sind beigetreten!');
-      }, 2000);
-    } else if (!isHost && allParticipants.length === 1) {
-      // Demo-Teilnehmer für Gäste
-      setTimeout(() => {
-        const demoParticipants = [
-          { id: Date.now(), name: username, isHost: false, isYou: true, avatar: '🎥', joinedAt: new Date().toISOString() },
-          { id: Date.now() + 1, name: 'Host', isHost: true, isYou: false, avatar: '👑', joinedAt: new Date().toISOString() }
-        ];
-        setParticipants(demoParticipants);
-        localStorage.setItem(`participants_${sessionId}`, JSON.stringify(demoParticipants));
-        addSystemMessage('🎉 Du bist dem Chat beigetreten!');
-      }, 1000);
-    }
+  // Socket.IO und Peer Verbindungen
+  useEffect(() => {
+    if (!stream) return;
 
-    // Canvas Animation
-    const canvas = document.createElement('canvas');
-    canvas.width = 640;
-    canvas.height = 480;
-    let animationFrame;
-    let rotation = 0;
+    // Socket.IO Verbindung
+    socket = io();
 
-    const drawFrame = () => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+    socket.on('connect', () => {
+      console.log('Connected to server');
+      socket.emit('join-room', { roomId: sessionId, username });
+    });
+
+    socket.on('user-connected', ({ userId, username: userName }) => {
+      console.log('User connected:', userId, userName);
       
-      rotation += 0.01;
-      
-      const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-      gradient.addColorStop(0, '#667eea');
-      gradient.addColorStop(0.5, '#764ba2');
-      gradient.addColorStop(1, '#f093fb');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-      ctx.lineWidth = 1;
-      for (let i = 0; i < canvas.width; i += 50) {
-        ctx.beginPath();
-        ctx.moveTo(i, 0);
-        ctx.lineTo(i, canvas.height);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(0, i);
-        ctx.lineTo(canvas.width, i);
-        ctx.stroke();
+      // Neuen Peer erstellen
+      const peer = new Peer({
+        initiator: true,
+        trickle: false,
+        stream: stream
+      });
+
+      peer.on('signal', signal => {
+        socket.emit('signal', { to: userId, signal });
+      });
+
+      peer.on('stream', remoteStream => {
+        setPeers(prev => [...prev, { id: userId, stream: remoteStream, username: userName }]);
+        setParticipants(prev => [...prev, { id: userId, name: userName }]);
+        addSystemMessage(`👤 ${userName} ist dem Chat beigetreten`);
+      });
+
+      peersRef.current[userId] = peer;
+    });
+
+    socket.on('signal', ({ from, signal }) => {
+      // Peer existiert noch nicht? Dann erstellen
+      if (!peersRef.current[from]) {
+        const peer = new Peer({
+          initiator: false,
+          trickle: false,
+          stream: stream
+        });
+
+        peer.on('signal', signal => {
+          socket.emit('signal', { to: from, signal });
+        });
+
+        peer.on('stream', remoteStream => {
+          setPeers(prev => [...prev, { id: from, stream: remoteStream, username: 'Gast' }]);
+          setParticipants(prev => [...prev, { id: from, name: 'Gast' }]);
+        });
+
+        peersRef.current[from] = peer;
       }
-      
-      const pulse = Math.sin(rotation * 2) * 10 + 50;
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = '#fff';
-      ctx.beginPath();
-      ctx.arc(canvas.width/2, canvas.height/2 - 30, pulse, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.1)';
-      ctx.fill();
-      
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = '#00ff00';
-      ctx.font = 'bold 32px "Courier New", monospace';
-      ctx.fillStyle = '#fff';
-      ctx.fillText('🎥 LIVE', canvas.width/2 - 70, canvas.height/2 - 50);
-      
-      ctx.font = '20px Arial';
-      ctx.fillStyle = '#0ff';
-      ctx.fillText(username, canvas.width/2 - 50, canvas.height/2 + 20);
-      
-      ctx.font = '14px monospace';
-      ctx.fillStyle = '#ff0';
-      ctx.fillText(`Session: ${sessionId}`, canvas.width/2 - 60, canvas.height/2 + 70);
-      
-      ctx.font = '12px monospace';
-      ctx.fillStyle = 'rgba(255,255,255,0.7)';
-      ctx.fillText('✨ Screen Share aktivieren für Video', canvas.width/2 - 120, canvas.height - 30);
-      
-      ctx.shadowBlur = 0;
-      
-      animationFrame = requestAnimationFrame(drawFrame);
-    };
-    
-    drawFrame();
-    
-    const stream = canvas.captureStream(30);
-    if (videoRef.current) {
-      videoRef.current.srcObject = stream;
-    }
+
+      peersRef.current[from].signal(signal);
+    });
+
+    socket.on('user-disconnected', userId => {
+      console.log('User disconnected:', userId);
+      if (peersRef.current[userId]) {
+        peersRef.current[userId].destroy();
+        delete peersRef.current[userId];
+      }
+      setPeers(prev => prev.filter(peer => peer.id !== userId));
+      setParticipants(prev => prev.filter(p => p.id !== userId));
+      addSystemMessage(`👋 Ein Teilnehmer hat den Chat verlassen`);
+    });
 
     return () => {
-      cancelAnimationFrame(animationFrame);
-      if (videoRef.current && videoRef.current.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks();
-        tracks.forEach(track => track.stop());
-      }
+      socket.disconnect();
     };
-  }, [username, sessionId, isHost]);
+  }, [stream, sessionId, username]);
 
   const addSystemMessage = (text) => {
     const newMessage = {
@@ -153,12 +133,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
       timestamp: new Date().toLocaleTimeString()
     };
     setMessages(prev => [...prev, newMessage]);
-    setTimeout(() => {
-      const chatContainer = document.getElementById('chat-messages');
-      if (chatContainer) {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-      }
-    }, 100);
   };
 
   const sendMessage = () => {
@@ -173,72 +147,61 @@ export default function VideoChat({ sessionId, username, isHost }) {
       setMessages(prev => [...prev, newMessage]);
       setMessage('');
       
-      // Simuliere Antwort von anderen Teilnehmern
-      if (Math.random() > 0.7 && participants.length > 1) {
-        const randomParticipant = participants.find(p => !p.isYou);
-        if (randomParticipant) {
-          setTimeout(() => {
-            const replies = ['Ja! 👍', 'Cool 😎', 'Nice!', '👍👍👍', '🚀'];
-            const randomReply = replies[Math.floor(Math.random() * replies.length)];
-            const replyMessage = {
-              id: Date.now(),
-              user: randomParticipant.name,
-              text: randomReply,
-              isSystem: false,
-              timestamp: new Date().toLocaleTimeString()
-            };
-            setMessages(prev => [...prev, replyMessage]);
-          }, 1000);
-        }
-      }
-      
-      setTimeout(() => {
-        const chatContainer = document.getElementById('chat-messages');
-        if (chatContainer) {
-          chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-      }, 100);
+      // Nachricht an alle über Socket.IO senden
+      socket.emit('chat-message', { roomId: sessionId, message: newMessage });
     }
   };
 
   const toggleMute = () => {
-    setMuted(!muted);
-    addSystemMessage(muted ? '🎤 Mikrofon aktiviert' : '🔇 Mikrofon stumm');
+    if (stream) {
+      stream.getAudioTracks().forEach(track => {
+        track.enabled = !track.enabled;
+      });
+      setMuted(!muted);
+      addSystemMessage(muted ? '🎤 Mikrofon aktiviert' : '🔇 Mikrofon stumm');
+    }
+  };
+
+  const toggleVideo = () => {
+    if (stream) {
+      stream.getVideoTracks().forEach(track => {
+        track.enabled = !track.enabled;
+      });
+      setVideoEnabled(!videoEnabled);
+      addSystemMessage(videoEnabled ? '📹 Kamera aus' : '📷 Kamera an');
+    }
   };
 
   const toggleScreenShare = async () => {
     if (!sharingScreen) {
       try {
-        const screen = await navigator.mediaDevices.getDisplayMedia({ 
-          video: true 
-        });
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         
-        if (videoRef.current) {
-          if (videoRef.current.srcObject) {
-            const oldTracks = videoRef.current.srcObject.getTracks();
-            oldTracks.forEach(track => track.stop());
-          }
-          videoRef.current.srcObject = screen;
-        }
+        // Video track ersetzen für alle Peers
+        const videoTrack = screenStream.getVideoTracks()[0];
+        const senders = videoRef.current.srcObject.getSenders();
+        const videoSender = senders.find(sender => sender.track.kind === 'video');
+        videoSender.replaceTrack(videoTrack);
         
         setSharingScreen(true);
         addSystemMessage('📺 Screen Sharing gestartet');
         
-        screen.getVideoTracks()[0].onended = () => {
-          stopScreenShare();
+        videoTrack.onended = () => {
+          toggleScreenShare();
         };
       } catch (err) {
         console.error('Screen Share Fehler:', err);
-        addSystemMessage('❌ Screen Share wurde abgebrochen');
+        addSystemMessage('❌ Screen Share abgebrochen');
       }
     } else {
-      stopScreenShare();
+      // Zurück zur Kamera
+      const videoTrack = stream.getVideoTracks()[0];
+      const senders = videoRef.current.srcObject.getSenders();
+      const videoSender = senders.find(sender => sender.track.kind === 'video');
+      videoSender.replaceTrack(videoTrack);
+      setSharingScreen(false);
+      addSystemMessage('📺 Screen Sharing beendet');
     }
-  };
-
-  const stopScreenShare = () => {
-    addSystemMessage('📺 Screen Sharing beendet');
-    window.location.reload();
   };
 
   const copySessionLink = () => {
@@ -248,18 +211,10 @@ export default function VideoChat({ sessionId, username, isHost }) {
   };
 
   const leaveSession = () => {
-    // Teilnehmer aus Liste entfernen
-    const storedParticipants = localStorage.getItem(`participants_${sessionId}`);
-    if (storedParticipants) {
-      let allParticipants = JSON.parse(storedParticipants);
-      allParticipants = allParticipants.filter(p => p.name !== username);
-      localStorage.setItem(`participants_${sessionId}`, JSON.stringify(allParticipants));
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
     }
-    
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
-    }
+    socket.disconnect();
     router.push('/');
   };
 
@@ -284,7 +239,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
             style={styles.iconButton}
             title="Teilnehmer"
           >
-            👥 {participants.length}
+            👥 {participants.length + 1}
           </button>
           <button onClick={copySessionLink} style={styles.iconButton} title="Link kopieren">
             🔗
@@ -294,37 +249,60 @@ export default function VideoChat({ sessionId, username, isHost }) {
 
       <div style={styles.mainContent}>
         <div style={styles.videoSection}>
-          <div style={styles.videoCard}>
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              style={styles.video}
-            />
-            <div style={styles.videoOverlay}>
+          <div style={styles.videoGrid}>
+            {/* Eigener Video-Stream */}
+            <div style={styles.videoCard}>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={styles.video}
+              />
               <div style={styles.videoLabel}>
-                <span style={styles.liveBadge}>● LIVE</span>
+                <span style={styles.liveBadge}>● YOU</span>
                 <span>{username}</span>
-                {muted && <span style={styles.mutedBadge}>🔇 MUTED</span>}
-                {sharingScreen && <span style={styles.sharingBadge}>📺 SCREEN</span>}
+                {muted && <span style={styles.mutedBadge}>🔇</span>}
+                {sharingScreen && <span style={styles.sharingBadge}>📺</span>}
               </div>
             </div>
+            
+            {/* Andere Teilnehmer */}
+            {peers.map(peer => (
+              <div key={peer.id} style={styles.videoCard}>
+                <video
+                  autoPlay
+                  playsInline
+                  ref={ref => {
+                    if (ref) ref.srcObject = peer.stream;
+                  }}
+                  style={styles.video}
+                />
+                <div style={styles.videoLabel}>
+                  <span>{peer.username || 'Teilnehmer'}</span>
+                </div>
+              </div>
+            ))}
           </div>
           
           <div style={styles.controls}>
             <button 
               onClick={toggleMute} 
               style={styles.controlButton(muted ? '#e74c3c' : '#2ecc71')}
-              title={muted ? "Mikrofon an" : "Mikrofon aus"}
             >
               {muted ? '🔇' : '🎤'}
             </button>
             
             <button 
+              onClick={toggleVideo} 
+              style={styles.controlButton(videoEnabled ? '#2ecc71' : '#e74c3c')}
+            >
+              {videoEnabled ? '📹' : '📷'}
+            </button>
+            
+            <button 
               onClick={toggleScreenShare} 
               style={styles.controlButton(sharingScreen ? '#e67e22' : '#3498db')}
-              title={sharingScreen ? "Screen Share stoppen" : "Screen Share starten"}
             >
               🖥️
             </button>
@@ -332,7 +310,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
             <button 
               onClick={copySessionLink} 
               style={styles.controlButton('#9b59b6')}
-              title="Link kopieren"
             >
               🔗
             </button>
@@ -340,7 +317,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
             <button 
               onClick={leaveSession} 
               style={styles.controlButton('#e74c3c')}
-              title="Verlassen"
             >
               🚪
             </button>
@@ -351,16 +327,25 @@ export default function VideoChat({ sessionId, username, isHost }) {
           {showParticipants && (
             <div style={styles.participantsPanel}>
               <h3 style={styles.panelTitle}>
-                👥 Teilnehmer ({participants.length})
+                👥 Teilnehmer ({participants.length + 1})
               </h3>
-              {participants.map((p, idx) => (
-                <div key={idx} style={styles.participantItem}>
-                  <div style={styles.participantAvatar}>{p.avatar}</div>
+              <div style={styles.participantItem}>
+                <div style={styles.participantAvatar}>🎥</div>
+                <div style={styles.participantInfo}>
+                  <span style={styles.participantName}>
+                    {username} {isHost && '👑'}
+                  </span>
+                  <span style={styles.youBadge}>Du</span>
+                </div>
+                <div style={styles.participantStatus}>
+                  <span style={styles.statusDot}></span>
+                </div>
+              </div>
+              {participants.map(p => (
+                <div key={p.id} style={styles.participantItem}>
+                  <div style={styles.participantAvatar}>👤</div>
                   <div style={styles.participantInfo}>
-                    <span style={styles.participantName}>
-                      {p.name} {p.isHost && '👑'}
-                    </span>
-                    {p.isYou && <span style={styles.youBadge}>Du</span>}
+                    <span style={styles.participantName}>{p.name}</span>
                   </div>
                   <div style={styles.participantStatus}>
                     <span style={styles.statusDot}></span>
@@ -414,8 +399,7 @@ const styles = {
   container: {
     minHeight: '100vh',
     background: 'linear-gradient(135deg, #0a0a2a 0%, #1a0033 100%)',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    position: 'relative'
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
   },
   header: {
     background: 'rgba(0,0,0,0.5)',
@@ -485,6 +469,13 @@ const styles = {
     flexDirection: 'column',
     gap: '20px'
   },
+  videoGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+    gap: '20px',
+    flex: 1,
+    overflowY: 'auto'
+  },
   videoCard: {
     position: 'relative',
     background: '#000',
@@ -498,37 +489,31 @@ const styles = {
     height: '100%',
     objectFit: 'cover'
   },
-  videoOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
-    padding: '20px'
-  },
   videoLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
+    position: 'absolute',
+    bottom: '10px',
+    left: '10px',
+    background: 'rgba(0,0,0,0.7)',
+    padding: '5px 10px',
+    borderRadius: '20px',
     color: 'white',
-    fontSize: '14px'
+    fontSize: '12px',
+    display: 'flex',
+    gap: '8px'
   },
   liveBadge: {
-    background: '#e74c3c',
-    padding: '2px 8px',
-    borderRadius: '4px',
-    fontSize: '10px',
+    color: '#e74c3c',
     fontWeight: 'bold'
   },
   mutedBadge: {
     background: '#e74c3c',
-    padding: '2px 8px',
+    padding: '2px 6px',
     borderRadius: '12px',
     fontSize: '10px'
   },
   sharingBadge: {
     background: '#e67e22',
-    padding: '2px 8px',
+    padding: '2px 6px',
     borderRadius: '12px',
     fontSize: '10px'
   },
