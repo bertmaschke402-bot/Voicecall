@@ -7,28 +7,10 @@ export default function VideoChat({ sessionId, username, isHost }) {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [sharingScreen, setSharingScreen] = useState(false);
   const [participants, setParticipants] = useState([]);
-  const [sessionExists, setSessionExists] = useState(true);
   const videoRef = useRef();
   const router = useRouter();
 
-  // Session existiert? - Nur Host kann Session erstellen
   useEffect(() => {
-    if (isHost) {
-      // Host erstellt Session
-      localStorage.setItem(`session_${sessionId}_exists`, 'true');
-      localStorage.setItem(`session_${sessionId}_host`, username);
-      console.log('✅ Session erstellt:', sessionId);
-    } else {
-      // Guest checkt ob Session existiert
-      const exists = localStorage.getItem(`session_${sessionId}_exists`);
-      if (!exists) {
-        console.log('❌ Session existiert nicht:', sessionId);
-        setSessionExists(false);
-        return;
-      }
-      console.log('✅ Session gefunden:', sessionId);
-    }
-
     // Kamera starten
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(myStream => {
@@ -37,59 +19,66 @@ export default function VideoChat({ sessionId, username, isHost }) {
           videoRef.current.srcObject = myStream;
         }
         
-        // User zur Session hinzufügen
-        const users = JSON.parse(localStorage.getItem(`session_${sessionId}_users`) || '[]');
-        const userExists = users.find(u => u.name === username);
+        // Teilnehmer aus URL-Parametern oder localStorage
+        const urlParams = new URLSearchParams(window.location.search);
+        const allParticipants = [];
         
-        if (!userExists) {
-          users.push({ 
-            name: username, 
-            isHost: isHost, 
-            id: Date.now(),
-            joinedAt: new Date().toLocaleTimeString()
-          });
-          localStorage.setItem(`session_${sessionId}_users`, JSON.stringify(users));
+        // Eigene Info
+        allParticipants.push({
+          name: username,
+          isHost: isHost,
+          id: 'me',
+          joinedAt: new Date().toLocaleTimeString()
+        });
+        
+        // Andere Teilnehmer aus localStorage (wenn vorhanden)
+        const stored = localStorage.getItem(`participants_${sessionId}`);
+        if (stored) {
+          const others = JSON.parse(stored).filter(p => p.name !== username);
+          allParticipants.push(...others);
         }
         
-        setParticipants(users);
+        setParticipants(allParticipants);
         
-        // Broadcast für andere Tabs
-        localStorage.setItem(`session_${sessionId}_update`, Date.now().toString());
+        // Storage Event für andere Tabs im GLEICHEN BROWSER
+        const handleStorage = (e) => {
+          if (e.key === `participants_${sessionId}`) {
+            const updated = JSON.parse(e.newValue);
+            setParticipants(prev => {
+              const me = prev.find(p => p.id === 'me');
+              const others = updated.filter(p => p.name !== username);
+              return [me, ...others];
+            });
+          }
+        };
+        
+        window.addEventListener('storage', handleStorage);
+        
+        return () => {
+          window.removeEventListener('storage', handleStorage);
+          if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+          }
+        };
       })
       .catch(err => {
         console.error('Kamera Fehler:', err);
         alert('Bitte Kamera und Mikrofon erlauben!');
       });
-
-    // Auf Updates hören
-    const handleStorage = (e) => {
-      if (e.key === `session_${sessionId}_users`) {
-        const updatedUsers = JSON.parse(e.newValue);
-        setParticipants(updatedUsers);
-      }
-    };
-    
-    window.addEventListener('storage', handleStorage);
-    
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-      // User entfernen wenn Seite geschlossen wird
-      const users = JSON.parse(localStorage.getItem(`session_${sessionId}_users`) || '[]');
-      const filtered = users.filter(u => u.name !== username);
-      localStorage.setItem(`session_${sessionId}_users`, JSON.stringify(filtered));
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-      
-      // Wenn Host geht und keine User mehr da, Session löschen
-      if (isHost && filtered.length === 0) {
-        localStorage.removeItem(`session_${sessionId}_exists`);
-        localStorage.removeItem(`session_${sessionId}_users`);
-        localStorage.removeItem(`session_${sessionId}_host`);
-        console.log('🗑️ Session gelöscht:', sessionId);
-      }
-    };
   }, [sessionId, username, isHost]);
+
+  const copySessionLink = () => {
+    const link = `${window.location.origin}/${sessionId}?username=DEIN_NAME`;
+    navigator.clipboard.writeText(link);
+    alert(`✅ Link kopiert!\n\nTeile diesen Link mit Freunden:\n${link}\n\nJeder der den Link öffnet, kommt in diese Session!`);
+  };
+
+  const leaveSession = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    router.push('/');
+  };
 
   const toggleMute = () => {
     if (stream) {
@@ -136,56 +125,16 @@ export default function VideoChat({ sessionId, username, isHost }) {
     }
   };
 
-  const copySessionLink = () => {
-    const link = `${window.location.origin}/${sessionId}?username=DEIN_NAME`;
-    navigator.clipboard.writeText(link);
-    alert(`✅ Link kopiert!\n\nTeile diesen Link mit anderen:\n${link}\n\nAndere müssen nur ihren Namen eintragen!`);
-  };
-
-  const leaveSession = () => {
-    const users = JSON.parse(localStorage.getItem(`session_${sessionId}_users`) || '[]');
-    const filtered = users.filter(u => u.name !== username);
-    localStorage.setItem(`session_${sessionId}_users`, JSON.stringify(filtered));
-    
-    if (isHost && filtered.length === 0) {
-      localStorage.removeItem(`session_${sessionId}_exists`);
-      localStorage.removeItem(`session_${sessionId}_host`);
-    }
-    
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-    router.push('/');
-  };
-
-  // Wenn Session nicht existiert
-  if (!sessionExists) {
-    return (
-      <div style={styles.errorContainer}>
-        <div style={styles.errorCard}>
-          <div style={styles.errorIcon}>❌</div>
-          <h1 style={styles.errorTitle}>Session existiert nicht!</h1>
-          <p style={styles.errorText}>
-            Die Session <strong>{sessionId}</strong> wurde noch nicht erstellt.
-          </p>
-          <p style={styles.errorText}>
-            Jemand muss zuerst eine Session mit diesem Code erstellen.
-          </p>
-          <button onClick={() => router.push('/')} style={styles.errorButton}>
-            Zurück zur Startseite
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={styles.container}>
       <div style={styles.header}>
         <div>
           <h2 style={styles.title}>🎥 Session: <span style={styles.code}>{sessionId}</span></h2>
-          <p style={styles.user}>👤 {username} {isHost ? '👑 (Host)' : '📱 (Gast)'}</p>
-          <p style={styles.info}>📡 {participants.length} Teilnehmer online</p>
+          <p style={styles.user}>👤 {username} {isHost && '👑 (Host)'}</p>
+          <p style={styles.info}>📡 {participants.length} in dieser Session</p>
+          {!isHost && (
+            <p style={styles.waiting}>💡 Teile den Link mit Freunden, damit sie joinen!</p>
+          )}
         </div>
         <div>
           <button onClick={copySessionLink} style={styles.linkButton}>
@@ -210,20 +159,29 @@ export default function VideoChat({ sessionId, username, isHost }) {
           </div>
         </div>
         
-        {/* Andere Teilnehmer */}
-        {participants.filter(p => p.name !== username).map(p => (
-          <div key={p.id} style={styles.videoCard}>
+        {/* Andere Teilnehmer (Platzhalter) */}
+        {participants.filter(p => p.id !== 'me').map((p, idx) => (
+          <div key={idx} style={styles.videoCard}>
             <div style={styles.placeholder}>
               <div style={styles.avatar}>👤</div>
               <div style={styles.placeholderName}>{p.name}</div>
               <div style={styles.joinedTime}>joined {p.joinedAt}</div>
-              {p.isHost && <div style={styles.hostBadge}>👑 HOST</div>}
             </div>
-            <div style={styles.label}>
-              {p.name} {p.isHost && '👑'}
-            </div>
+            <div style={styles.label}>{p.name}</div>
           </div>
         ))}
+        
+        {/* Platzhalter für mehr Teilnehmer */}
+        {participants.filter(p => p.id !== 'me').length === 0 && (
+          <div style={styles.videoCard}>
+            <div style={styles.placeholder}>
+              <div style={styles.avatar}>🔗</div>
+              <div style={styles.placeholderName}>Warte auf Teilnehmer</div>
+              <div style={styles.joinedTime}>Teile den Link!</div>
+            </div>
+            <div style={styles.label}>wartet...</div>
+          </div>
+        )}
       </div>
 
       <div style={styles.controls}>
@@ -257,7 +215,8 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderBottom: '1px solid rgba(102,126,234,0.3)'
+    borderBottom: '1px solid rgba(102,126,234,0.3)',
+    flexWrap: 'wrap'
   },
   title: {
     color: 'white',
@@ -279,6 +238,11 @@ const styles = {
     margin: '5px 0 0',
     fontSize: '12px'
   },
+  waiting: {
+    color: '#f39c12',
+    margin: '5px 0 0',
+    fontSize: '11px'
+  },
   linkButton: {
     padding: '10px 20px',
     background: '#667eea',
@@ -294,7 +258,7 @@ const styles = {
     gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
     gap: '20px',
     padding: '20px',
-    height: 'calc(100vh - 160px)',
+    height: 'calc(100vh - 180px)',
     overflowY: 'auto'
   },
   videoCard: {
@@ -318,8 +282,7 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    color: 'white',
-    position: 'relative'
+    color: 'white'
   },
   avatar: {
     fontSize: '64px',
@@ -333,17 +296,6 @@ const styles = {
     fontSize: '10px',
     opacity: 0.7,
     marginTop: '5px'
-  },
-  hostBadge: {
-    position: 'absolute',
-    top: '10px',
-    right: '10px',
-    background: 'gold',
-    color: '#333',
-    padding: '2px 8px',
-    borderRadius: '20px',
-    fontSize: '10px',
-    fontWeight: 'bold'
   },
   hostLabel: {
     background: 'gold',
@@ -383,45 +335,5 @@ const styles = {
     cursor: 'pointer',
     transition: 'transform 0.2s',
     boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-  }),
-  errorContainer: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'linear-gradient(135deg, #0a0a2a 0%, #1a0033 100%)'
-  },
-  errorCard: {
-    background: 'rgba(0,0,0,0.8)',
-    backdropFilter: 'blur(10px)',
-    padding: '40px',
-    borderRadius: '20px',
-    textAlign: 'center',
-    maxWidth: '500px',
-    border: '1px solid rgba(231,76,60,0.5)'
-  },
-  errorIcon: {
-    fontSize: '64px',
-    marginBottom: '20px'
-  },
-  errorTitle: {
-    color: '#e74c3c',
-    marginBottom: '20px',
-    fontSize: '28px'
-  },
-  errorText: {
-    color: 'white',
-    marginBottom: '15px',
-    fontSize: '16px'
-  },
-  errorButton: {
-    marginTop: '20px',
-    padding: '12px 24px',
-    background: '#667eea',
-    color: 'white',
-    border: 'none',
-    borderRadius: '10px',
-    cursor: 'pointer',
-    fontSize: '16px'
-  }
+  })
 };
