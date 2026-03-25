@@ -117,8 +117,7 @@ const styles = {
     border: '2px solid #e0e0e0',
     borderRadius: '10px',
     fontSize: '16px',
-    boxSizing: 'border-box',
-    transition: 'border-color 0.3s'
+    boxSizing: 'border-box'
   },
   buttonPrimary: {
     width: '100%',
@@ -130,8 +129,7 @@ const styles = {
     fontSize: '16px',
     fontWeight: 'bold',
     cursor: 'pointer',
-    marginTop: '10px',
-    transition: 'background 0.3s'
+    marginTop: '10px'
   },
   buttonSecondary: {
     width: '100%',
@@ -143,8 +141,7 @@ const styles = {
     fontSize: '16px',
     fontWeight: 'bold',
     cursor: 'pointer',
-    marginTop: '10px',
-    transition: 'background 0.3s'
+    marginTop: '10px'
   },
   divider: {
     textAlign: 'center',
