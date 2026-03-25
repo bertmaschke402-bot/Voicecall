@@ -7,24 +7,15 @@ export default function VideoChat({ sessionId, username, isHost }) {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [sharingScreen, setSharingScreen] = useState(false);
   const [screenStream, setScreenStream] = useState(null);
-  const [participants, setParticipants] = useState([]);
   const videoRef = useRef();
   const router = useRouter();
 
   useEffect(() => {
-    // Kamera starten
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(myStream => {
         setStream(myStream);
         if (videoRef.current) {
           videoRef.current.srcObject = myStream;
-        }
-        
-        // Demo: Simuliere andere Teilnehmer (für die Demo)
-        // In einer echten App würdest du hier WebRTC Verbindungen aufbauen
-        if (isHost) {
-          // Host kann andere einladen
-          console.log('Session erstellt:', sessionId);
         }
       })
       .catch(err => {
@@ -68,7 +59,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
         
         setScreenStream(screen);
         
-        // Ersetze Video Track mit Screen Share
         const videoTrack = screen.getVideoTracks()[0];
         const currentVideoTrack = stream.getVideoTracks()[0];
         
@@ -92,7 +82,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
     if (screenStream) {
       screenStream.getTracks().forEach(track => track.stop());
       
-      // Zurück zur Kamera
       const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
       const newVideoTrack = newStream.getVideoTracks()[0];
       const oldVideoTrack = stream.getVideoTracks()[0];
@@ -108,7 +97,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
   const copySessionLink = () => {
     const link = window.location.href;
     navigator.clipboard.writeText(link);
-    alert(`Link kopiert: ${link}\nTeile diesen Link mit anderen!`);
+    alert(`Link kopiert: ${link}`);
   };
 
   const leaveSession = () => {
@@ -146,7 +135,6 @@ export default function VideoChat({ sessionId, username, isHost }) {
           </div>
         </div>
         
-        {/* Platzhalter für weitere Teilnehmer */}
         {!isHost && (
           <div style={styles.waitingCard}>
             <p>⏳ Warte auf Host...</p>
