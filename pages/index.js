@@ -8,24 +8,29 @@ export default function Home() {
 
   const createSession = () => {
     if (username.trim()) {
-      const sessionId = Math.random().toString(36).substring(2, 8);
+      const sessionId = Math.random().toString(36).substring(2, 8).toUpperCase();
       router.push(`/${sessionId}?username=${encodeURIComponent(username)}&host=true`);
+    } else {
+      alert('Bitte gib deinen Namen ein');
     }
   };
 
   const joinSession = () => {
     if (sessionName.trim() && username.trim()) {
-      router.push(`/${sessionName}?username=${encodeURIComponent(username)}`);
+      router.push(`/${sessionName.toUpperCase()}?username=${encodeURIComponent(username)}`);
+    } else {
+      alert('Bitte gib Session-Code und Namen ein');
     }
   };
 
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>🎥 Video Chat App</h1>
+        <h1 style={styles.title}>🎥 Video Chat</h1>
+        <p style={styles.subtitle}>Einfacher Video-Chat mit Screen-Sharing</p>
         
         <div style={styles.section}>
-          <h2>Session erstellen</h2>
+          <h2 style={styles.sectionTitle}>Neue Session starten</h2>
           <input
             type="text"
             placeholder="Dein Name"
@@ -33,20 +38,22 @@ export default function Home() {
             onChange={(e) => setUsername(e.target.value)}
             style={styles.input}
           />
-          <button onClick={createSession} style={styles.button}>
-            Neue Session erstellen
+          <button onClick={createSession} style={styles.buttonPrimary}>
+            ✨ Session erstellen
           </button>
         </div>
 
-        <div style={styles.divider}>oder</div>
+        <div style={styles.divider}>
+          <span>oder</span>
+        </div>
 
         <div style={styles.section}>
-          <h2>Session beitreten</h2>
+          <h2 style={styles.sectionTitle}>Session beitreten</h2>
           <input
             type="text"
-            placeholder="Session Code"
+            placeholder="Session-Code (z.B. ABC123)"
             value={sessionName}
-            onChange={(e) => setSessionName(e.target.value)}
+            onChange={(e) => setSessionName(e.target.value.toUpperCase())}
             style={styles.input}
           />
           <input
@@ -56,8 +63,8 @@ export default function Home() {
             onChange={(e) => setUsername(e.target.value)}
             style={styles.input}
           />
-          <button onClick={joinSession} style={styles.button}>
-            Session beitreten
+          <button onClick={joinSession} style={styles.buttonSecondary}>
+            🚪 Session beitreten
           </button>
         </div>
       </div>
@@ -72,41 +79,69 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    fontFamily: 'Arial, sans-serif'
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    padding: '20px'
   },
   card: {
     background: 'white',
     padding: '40px',
     borderRadius: '20px',
     boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-    maxWidth: '400px',
-    width: '90%'
+    maxWidth: '450px',
+    width: '100%'
   },
   title: {
     textAlign: 'center',
     color: '#333',
-    marginBottom: '30px'
+    marginBottom: '10px',
+    fontSize: '32px'
+  },
+  subtitle: {
+    textAlign: 'center',
+    color: '#666',
+    marginBottom: '30px',
+    fontSize: '14px'
   },
   section: {
-    marginBottom: '20px'
+    marginBottom: '30px'
+  },
+  sectionTitle: {
+    fontSize: '18px',
+    color: '#555',
+    marginBottom: '15px'
   },
   input: {
     width: '100%',
     padding: '12px',
-    margin: '10px 0',
-    border: '1px solid #ddd',
-    borderRadius: '8px',
+    margin: '8px 0',
+    border: '2px solid #e0e0e0',
+    borderRadius: '10px',
     fontSize: '16px',
-    boxSizing: 'border-box'
+    boxSizing: 'border-box',
+    transition: 'border-color 0.3s'
   },
-  button: {
+  buttonPrimary: {
     width: '100%',
     padding: '12px',
     backgroundColor: '#667eea',
     color: 'white',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '10px',
     fontSize: '16px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    marginTop: '10px',
+    transition: 'background 0.3s'
+  },
+  buttonSecondary: {
+    width: '100%',
+    padding: '12px',
+    backgroundColor: '#48c6ef',
+    color: 'white',
+    border: 'none',
+    borderRadius: '10px',
+    fontSize: '16px',
+    fontWeight: 'bold',
     cursor: 'pointer',
     marginTop: '10px',
     transition: 'background 0.3s'
@@ -114,6 +149,7 @@ const styles = {
   divider: {
     textAlign: 'center',
     margin: '20px 0',
-    color: '#999'
+    position: 'relative',
+    borderTop: '1px solid #e0e0e0'
   }
 };
