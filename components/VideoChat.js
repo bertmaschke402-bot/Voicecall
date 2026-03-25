@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
-import Peer from 'peerjs';
 
 export default function VideoChat({ sessionId, username, isHost }) {
-  const [peers, setPeers] = useState([]);
   const [muted, setMuted] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [sharingScreen, setSharingScreen] = useState(false);
@@ -12,81 +10,55 @@ export default function VideoChat({ sessionId, username, isHost }) {
   const [messages, setMessages] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [showParticipants, setShowParticipants] = useState(true);
-  const [peerId, setPeerId] = useState('');
   const videoRef = useRef();
-  const peerRef = useRef();
-  const peersRef = useRef({});
   const router = useRouter();
 
-  // PeerJS Verbindung
+  // Eigene Kamera starten
   useEffect(() => {
-    const peer = new Peer();
-    
-    peer.on('open', id => {
-      setPeerId(id);
-      console.log('My peer ID:', id);
-      
-      // In localStorage speichern für Session
-      const sessionPeers = JSON.parse(localStorage.getItem(`session_${sessionId}`) || '[]');
-      
-      if (isHost) {
-        // Host speichert seine ID
-        localStorage.setItem(`session_${sessionId}`, JSON.stringify([id]));
-      } else {
-        // Guest joined - Host benachrichtigen
-        const hostId = sessionPeers[0];
-        if (hostId) {
-          callPeer(hostId);
-        }
-      }
-    });
-
-    peer.on('call', call => {
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        .then(myStream => {
-          setStream(myStream);
-          if (videoRef.current) {
-            videoRef.current.srcObject = myStream;
-          }
-          call.answer(myStream);
-          call.on('stream', remoteStream => {
-            setPeers(prev => [...prev, { id: call.peer, stream: remoteStream }]);
-            setParticipants(prev => [...prev, { id: call.peer, name: 'Teilnehmer' }]);
-            addSystemMessage(`👤 Teilnehmer ist beigetreten`);
-          });
-        });
-    });
-
-    peerRef.current = peer;
-
-    // Eigene Kamera starten
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(myStream => {
         setStream(myStream);
         if (videoRef.current) {
           videoRef.current.srcObject = myStream;
         }
+        
+        // Teilnehmer aus localStorage laden
+        const stored = localStorage.getItem(`participants_${sessionId}`);
+        if (stored) {
+          setParticipants(JSON.parse(stored));
+        } else {
+          setParticipants([{ id: Date.now(), name: username, isHost, isYou: true }]);
+        }
       })
       .catch(err => {
         console.error('Kamera Fehler:', err);
       });
 
-    return () => {
-      peer.destroy();
-    };
-  }, [sessionId, isHost]);
-
-  const callPeer = (remotePeerId) => {
-    if (stream && remotePeerId) {
-      const call = peerRef.current.call(remotePeerId, stream);
-      call.on('stream', remoteStream => {
-        setPeers(prev => [...prev, { id: remotePeerId, stream: remoteStream }]);
-        setParticipants(prev => [...prev, { id: remotePeerId, name: 'Teilnehmer' }]);
-        addSystemMessage(`👤 Teilnehmer ist beigetreten`);
-      });
-      peersRef.current[remotePeerId] = call;
+    // Chat-Nachrichten laden
+    const savedMessages = localStorage.getItem(`chat_${sessionId}`);
+    if (savedMessages) {
+      setMessages(JSON.parse(savedMessages));
     }
-  };
+
+    // Storage Event für andere Tabs/Fenster
+    const handleStorage = (e) => {
+      if (e.key === `participants_${sessionId}` && e.newValue) {
+        setParticipants(JSON.parse(e.newValue));
+      }
+      if (e.key === `chat_${sessionId}` && e.newValue) {
+        setMessages(JSON.parse(e.newValue));
+      }
+    };
+    
+    window.addEventListener('storage', handleStorage);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [sessionId, username, isHost]);
 
   const addSystemMessage = (text) => {
     const newMessage = {
@@ -96,7 +68,9 @@ export default function VideoChat({ sessionId, username, isHost }) {
       isSystem: true,
       timestamp: new Date().toLocaleTimeString()
     };
-    setMessages(prev => [...prev, newMessage]);
+    const updated = [...messages, newMessage];
+    setMessages(updated);
+    localStorage.setItem(`chat_${sessionId}`, JSON.stringify(updated));
   };
 
   const sendMessage = () => {
@@ -108,41 +82,42 @@ export default function VideoChat({ sessionId, username, isHost }) {
         isSystem: false,
         timestamp: new Date().toLocaleTimeString()
       };
-      setMessages(prev => [...prev, newMessage]);
+      const updated = [...messages, newMessage];
+      setMessages(updated);
+      localStorage.setItem(`chat_${sessionId}`, JSON.stringify(updated));
       setMessage('');
       
-      // Nachricht in localStorage speichern für Session
-      const chatMessages = JSON.parse(localStorage.getItem(`chat_${sessionId}`) || '[]');
-      chatMessages.push(newMessage);
-      localStorage.setItem(`chat_${sessionId}`, JSON.stringify(chatMessages));
-      
-      // Andere Teilnehmer sehen Nachrichten über Storage Event
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: `chat_${sessionId}`,
-        newValue: JSON.stringify(chatMessages)
-      }));
+      // Scroll nach unten
+      setTimeout(() => {
+        const chatDiv = document.getElementById('chat-messages');
+        if (chatDiv) chatDiv.scrollTop = chatDiv.scrollHeight;
+      }, 100);
     }
   };
 
-  // Storage Event für Chat
-  useEffect(() => {
-    const handleStorage = (e) => {
-      if (e.key === `chat_${sessionId}` && e.newValue) {
-        const newMessages = JSON.parse(e.newValue);
-        setMessages(newMessages);
-      }
+  const addParticipant = () => {
+    // Simuliere neuen Teilnehmer (für Demo)
+    const newParticipant = {
+      id: Date.now(),
+      name: `Gast${Math.floor(Math.random() * 1000)}`,
+      isHost: false,
+      isYou: false
     };
-    
-    window.addEventListener('storage', handleStorage);
-    
-    // Bestehende Nachrichten laden
-    const savedMessages = localStorage.getItem(`chat_${sessionId}`);
-    if (savedMessages) {
-      setMessages(JSON.parse(savedMessages));
+    const updated = [...participants, newParticipant];
+    setParticipants(updated);
+    localStorage.setItem(`participants_${sessionId}`, JSON.stringify(updated));
+    addSystemMessage(`👤 ${newParticipant.name} ist beigetreten`);
+  };
+
+  const removeParticipant = (id) => {
+    const participant = participants.find(p => p.id === id);
+    const updated = participants.filter(p => p.id !== id);
+    setParticipants(updated);
+    localStorage.setItem(`participants_${sessionId}`, JSON.stringify(updated));
+    if (participant) {
+      addSystemMessage(`👋 ${participant.name} hat verlassen`);
     }
-    
-    return () => window.removeEventListener('storage', handleStorage);
-  }, [sessionId]);
+  };
 
   const toggleMute = () => {
     if (stream) {
@@ -150,7 +125,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
         track.enabled = !track.enabled;
       });
       setMuted(!muted);
-      addSystemMessage(muted ? '🎤 Mikrofon aktiviert' : '🔇 Mikrofon stumm');
+      addSystemMessage(muted ? '🎤 Mikrofon an' : '🔇 Mikrofon aus');
     }
   };
 
@@ -168,51 +143,43 @@ export default function VideoChat({ sessionId, username, isHost }) {
     if (!sharingScreen) {
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        
-        if (videoRef.current && videoRef.current.srcObject) {
+        if (videoRef.current) {
           const videoTrack = screenStream.getVideoTracks()[0];
-          const sender = videoRef.current.srcObject.getVideoTracks()[0];
-          videoRef.current.srcObject.removeTrack(sender);
-          videoRef.current.srcObject.addTrack(videoTrack);
+          const oldVideoTrack = stream.getVideoTracks()[0];
+          stream.removeTrack(oldVideoTrack);
+          stream.addTrack(videoTrack);
         }
-        
         setSharingScreen(true);
-        addSystemMessage('📺 Screen Sharing gestartet');
-        
+        addSystemMessage('📺 Screen Share gestartet');
         screenStream.getVideoTracks()[0].onended = () => {
-          toggleScreenShare();
+          stopScreenShare();
         };
       } catch (err) {
-        console.error('Screen Share Fehler:', err);
         addSystemMessage('❌ Screen Share abgebrochen');
       }
     } else {
-      // Zurück zur Kamera
-      navigator.mediaDevices.getUserMedia({ video: true })
-        .then(newStream => {
-          const newVideoTrack = newStream.getVideoTracks()[0];
-          const oldStream = videoRef.current.srcObject;
-          const oldVideoTrack = oldStream.getVideoTracks()[0];
-          oldStream.removeTrack(oldVideoTrack);
-          oldStream.addTrack(newVideoTrack);
-          setSharingScreen(false);
-          addSystemMessage('📺 Screen Sharing beendet');
-        });
+      stopScreenShare();
     }
   };
 
+  const stopScreenShare = async () => {
+    const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    const newVideoTrack = newStream.getVideoTracks()[0];
+    const oldVideoTrack = stream.getVideoTracks()[0];
+    stream.removeTrack(oldVideoTrack);
+    stream.addTrack(newVideoTrack);
+    setSharingScreen(false);
+    addSystemMessage('📺 Screen Share beendet');
+  };
+
   const copySessionLink = () => {
-    const link = window.location.href;
-    navigator.clipboard.writeText(link);
-    addSystemMessage('✅ Session-Link kopiert!');
+    navigator.clipboard.writeText(window.location.href);
+    addSystemMessage('✅ Link kopiert!');
   };
 
   const leaveSession = () => {
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
-    }
-    if (peerRef.current) {
-      peerRef.current.destroy();
     }
     router.push('/');
   };
@@ -229,36 +196,24 @@ export default function VideoChat({ sessionId, username, isHost }) {
             <p style={styles.userInfo}>
               {username} {isHost && <span style={styles.hostBadge}>👑 HOST</span>}
             </p>
-            <p style={styles.peerInfo}>ID: {peerId.slice(-6)}</p>
           </div>
         </div>
-        
         <div style={styles.headerRight}>
-          <button 
-            onClick={() => setShowParticipants(!showParticipants)} 
-            style={styles.iconButton}
-            title="Teilnehmer"
-          >
-            👥 {participants.length + 1}
+          <button onClick={() => setShowParticipants(!showParticipants)} style={styles.iconButton}>
+            👥 {participants.length}
           </button>
-          <button onClick={copySessionLink} style={styles.iconButton} title="Link kopieren">
-            🔗
-          </button>
+          <button onClick={copySessionLink} style={styles.iconButton}>🔗</button>
+          {isHost && (
+            <button onClick={addParticipant} style={styles.iconButton}>➕</button>
+          )}
         </div>
       </div>
 
       <div style={styles.mainContent}>
         <div style={styles.videoSection}>
           <div style={styles.videoGrid}>
-            {/* Eigener Video-Stream */}
             <div style={styles.videoCard}>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                style={styles.video}
-              />
+              <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
               <div style={styles.videoLabel}>
                 <span style={styles.liveBadge}>● YOU</span>
                 <span>{username}</span>
@@ -267,19 +222,25 @@ export default function VideoChat({ sessionId, username, isHost }) {
               </div>
             </div>
             
-            {/* Andere Teilnehmer */}
-            {peers.map(peer => (
-              <div key={peer.id} style={styles.videoCard}>
-                <video
-                  autoPlay
-                  playsInline
-                  ref={ref => {
-                    if (ref) ref.srcObject = peer.stream;
-                  }}
-                  style={styles.video}
-                />
+            {participants.filter(p => !p.isYou).map(p => (
+              <div key={p.id} style={styles.videoCard}>
+                <div style={styles.placeholderVideo}>
+                  <div style={styles.placeholderContent}>
+                    <span style={styles.placeholderIcon}>👤</span>
+                    <span>{p.name}</span>
+                  </div>
+                </div>
                 <div style={styles.videoLabel}>
-                  <span>Teilnehmer</span>
+                  <span>{p.name}</span>
+                  {!isHost && (
+                    <button 
+                      onClick={() => removeParticipant(p.id)}
+                      style={styles.removeButton}
+                      title="Entfernen"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -295,34 +256,22 @@ export default function VideoChat({ sessionId, username, isHost }) {
             <button onClick={toggleScreenShare} style={styles.controlButton(sharingScreen ? '#e67e22' : '#3498db')}>
               🖥️
             </button>
-            <button onClick={copySessionLink} style={styles.controlButton('#9b59b6')}>
-              🔗
-            </button>
-            <button onClick={leaveSession} style={styles.controlButton('#e74c3c')}>
-              🚪
-            </button>
+            <button onClick={copySessionLink} style={styles.controlButton('#9b59b6')}>🔗</button>
+            <button onClick={leaveSession} style={styles.controlButton('#e74c3c')}>🚪</button>
           </div>
         </div>
 
         <div style={styles.sidebar}>
           {showParticipants && (
             <div style={styles.participantsPanel}>
-              <h3 style={styles.panelTitle}>👥 Teilnehmer ({participants.length + 1})</h3>
-              <div style={styles.participantItem}>
-                <div style={styles.participantAvatar}>🎥</div>
-                <div style={styles.participantInfo}>
-                  <span style={styles.participantName}>{username} {isHost && '👑'}</span>
-                  <span style={styles.youBadge}>Du</span>
-                </div>
-                <div style={styles.participantStatus}>
-                  <span style={styles.statusDot}></span>
-                </div>
-              </div>
+              <h3 style={styles.panelTitle}>👥 Teilnehmer ({participants.length})</h3>
               {participants.map(p => (
                 <div key={p.id} style={styles.participantItem}>
-                  <div style={styles.participantAvatar}>👤</div>
+                  <div style={styles.participantAvatar}>{p.isYou ? '🎥' : '👤'}</div>
                   <div style={styles.participantInfo}>
-                    <span style={styles.participantName}>Teilnehmer</span>
+                    <span style={styles.participantName}>{p.name}</span>
+                    {p.isHost && <span style={styles.hostBadgeSmall}>👑</span>}
+                    {p.isYou && <span style={styles.youBadge}>Du</span>}
                   </div>
                   <div style={styles.participantStatus}>
                     <span style={styles.statusDot}></span>
@@ -336,7 +285,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
             <h3 style={styles.panelTitle}>💬 Chat ({messages.length})</h3>
             <div id="chat-messages" style={styles.chatMessages}>
               {messages.length === 0 && (
-                <div style={styles.emptyChat}>💬 Keine Nachrichten yet</div>
+                <div style={styles.emptyChat}>💬 Keine Nachrichten</div>
               )}
               {messages.map(msg => (
                 <div key={msg.id} style={msg.isSystem ? styles.systemMessage : styles.userMessage}>
@@ -412,17 +361,16 @@ const styles = {
     margin: '5px 0 0',
     fontSize: '14px'
   },
-  peerInfo: {
-    color: '#48c6ef',
-    fontSize: '10px',
-    margin: '2px 0 0'
-  },
   hostBadge: {
     background: 'linear-gradient(135deg, #ffd89b 0%, #c7e9fb 100%)',
     padding: '2px 8px',
     borderRadius: '12px',
     fontSize: '10px',
     marginLeft: '8px'
+  },
+  hostBadgeSmall: {
+    fontSize: '12px',
+    marginLeft: '4px'
   },
   iconButton: {
     background: '#2c3e50',
@@ -447,7 +395,7 @@ const styles = {
   },
   videoGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
     gap: '20px',
     flex: 1,
     overflowY: 'auto'
@@ -465,17 +413,37 @@ const styles = {
     height: '100%',
     objectFit: 'cover'
   },
+  placeholderVideo: {
+    width: '100%',
+    height: '100%',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  placeholderContent: {
+    textAlign: 'center',
+    color: 'white',
+    fontSize: '24px'
+  },
+  placeholderIcon: {
+    fontSize: '48px',
+    display: 'block',
+    marginBottom: '10px'
+  },
   videoLabel: {
     position: 'absolute',
     bottom: '10px',
     left: '10px',
+    right: '10px',
     background: 'rgba(0,0,0,0.7)',
     padding: '5px 10px',
     borderRadius: '20px',
     color: 'white',
     fontSize: '12px',
     display: 'flex',
-    gap: '8px'
+    justifyContent: 'space-between',
+    alignItems: 'center'
   },
   liveBadge: {
     color: '#e74c3c',
@@ -492,6 +460,19 @@ const styles = {
     padding: '2px 6px',
     borderRadius: '12px',
     fontSize: '10px'
+  },
+  removeButton: {
+    background: '#e74c3c',
+    border: 'none',
+    borderRadius: '50%',
+    width: '20px',
+    height: '20px',
+    color: 'white',
+    fontSize: '12px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   controls: {
     display: 'flex',
