@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
-import io from 'socket.io-client';
-import Peer from 'simple-peer';
-
-let socket;
+import Peer from 'peerjs';
 
 export default function VideoChat({ sessionId, username, isHost }) {
   const [peers, setPeers] = useState([]);
@@ -15,12 +12,54 @@ export default function VideoChat({ sessionId, username, isHost }) {
   const [messages, setMessages] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [showParticipants, setShowParticipants] = useState(true);
+  const [peerId, setPeerId] = useState('');
   const videoRef = useRef();
+  const peerRef = useRef();
   const peersRef = useRef({});
   const router = useRouter();
 
-  // Eigene Kamera starten
+  // PeerJS Verbindung
   useEffect(() => {
+    const peer = new Peer();
+    
+    peer.on('open', id => {
+      setPeerId(id);
+      console.log('My peer ID:', id);
+      
+      // In localStorage speichern für Session
+      const sessionPeers = JSON.parse(localStorage.getItem(`session_${sessionId}`) || '[]');
+      
+      if (isHost) {
+        // Host speichert seine ID
+        localStorage.setItem(`session_${sessionId}`, JSON.stringify([id]));
+      } else {
+        // Guest joined - Host benachrichtigen
+        const hostId = sessionPeers[0];
+        if (hostId) {
+          callPeer(hostId);
+        }
+      }
+    });
+
+    peer.on('call', call => {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        .then(myStream => {
+          setStream(myStream);
+          if (videoRef.current) {
+            videoRef.current.srcObject = myStream;
+          }
+          call.answer(myStream);
+          call.on('stream', remoteStream => {
+            setPeers(prev => [...prev, { id: call.peer, stream: remoteStream }]);
+            setParticipants(prev => [...prev, { id: call.peer, name: 'Teilnehmer' }]);
+            addSystemMessage(`👤 Teilnehmer ist beigetreten`);
+          });
+        });
+    });
+
+    peerRef.current = peer;
+
+    // Eigene Kamera starten
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(myStream => {
         setStream(myStream);
@@ -30,99 +69,24 @@ export default function VideoChat({ sessionId, username, isHost }) {
       })
       .catch(err => {
         console.error('Kamera Fehler:', err);
-        // Fallback zu Canvas wenn Kamera nicht funktioniert
-        const canvas = document.createElement('canvas');
-        canvas.width = 640;
-        canvas.height = 480;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#667eea';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = 'white';
-        ctx.font = '20px Arial';
-        ctx.fillText('📹 Kamera nicht verfügbar', 200, 240);
-        ctx.fillText(`Eingeloggt als: ${username}`, 200, 280);
-        const canvasStream = canvas.captureStream();
-        setStream(canvasStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = canvasStream;
-        }
       });
-  }, []);
-
-  // Socket.IO und Peer Verbindungen
-  useEffect(() => {
-    if (!stream) return;
-
-    // Socket.IO Verbindung
-    socket = io();
-
-    socket.on('connect', () => {
-      console.log('Connected to server');
-      socket.emit('join-room', { roomId: sessionId, username });
-    });
-
-    socket.on('user-connected', ({ userId, username: userName }) => {
-      console.log('User connected:', userId, userName);
-      
-      // Neuen Peer erstellen
-      const peer = new Peer({
-        initiator: true,
-        trickle: false,
-        stream: stream
-      });
-
-      peer.on('signal', signal => {
-        socket.emit('signal', { to: userId, signal });
-      });
-
-      peer.on('stream', remoteStream => {
-        setPeers(prev => [...prev, { id: userId, stream: remoteStream, username: userName }]);
-        setParticipants(prev => [...prev, { id: userId, name: userName }]);
-        addSystemMessage(`👤 ${userName} ist dem Chat beigetreten`);
-      });
-
-      peersRef.current[userId] = peer;
-    });
-
-    socket.on('signal', ({ from, signal }) => {
-      // Peer existiert noch nicht? Dann erstellen
-      if (!peersRef.current[from]) {
-        const peer = new Peer({
-          initiator: false,
-          trickle: false,
-          stream: stream
-        });
-
-        peer.on('signal', signal => {
-          socket.emit('signal', { to: from, signal });
-        });
-
-        peer.on('stream', remoteStream => {
-          setPeers(prev => [...prev, { id: from, stream: remoteStream, username: 'Gast' }]);
-          setParticipants(prev => [...prev, { id: from, name: 'Gast' }]);
-        });
-
-        peersRef.current[from] = peer;
-      }
-
-      peersRef.current[from].signal(signal);
-    });
-
-    socket.on('user-disconnected', userId => {
-      console.log('User disconnected:', userId);
-      if (peersRef.current[userId]) {
-        peersRef.current[userId].destroy();
-        delete peersRef.current[userId];
-      }
-      setPeers(prev => prev.filter(peer => peer.id !== userId));
-      setParticipants(prev => prev.filter(p => p.id !== userId));
-      addSystemMessage(`👋 Ein Teilnehmer hat den Chat verlassen`);
-    });
 
     return () => {
-      socket.disconnect();
+      peer.destroy();
     };
-  }, [stream, sessionId, username]);
+  }, [sessionId, isHost]);
+
+  const callPeer = (remotePeerId) => {
+    if (stream && remotePeerId) {
+      const call = peerRef.current.call(remotePeerId, stream);
+      call.on('stream', remoteStream => {
+        setPeers(prev => [...prev, { id: remotePeerId, stream: remoteStream }]);
+        setParticipants(prev => [...prev, { id: remotePeerId, name: 'Teilnehmer' }]);
+        addSystemMessage(`👤 Teilnehmer ist beigetreten`);
+      });
+      peersRef.current[remotePeerId] = call;
+    }
+  };
 
   const addSystemMessage = (text) => {
     const newMessage = {
@@ -147,10 +111,38 @@ export default function VideoChat({ sessionId, username, isHost }) {
       setMessages(prev => [...prev, newMessage]);
       setMessage('');
       
-      // Nachricht an alle über Socket.IO senden
-      socket.emit('chat-message', { roomId: sessionId, message: newMessage });
+      // Nachricht in localStorage speichern für Session
+      const chatMessages = JSON.parse(localStorage.getItem(`chat_${sessionId}`) || '[]');
+      chatMessages.push(newMessage);
+      localStorage.setItem(`chat_${sessionId}`, JSON.stringify(chatMessages));
+      
+      // Andere Teilnehmer sehen Nachrichten über Storage Event
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: `chat_${sessionId}`,
+        newValue: JSON.stringify(chatMessages)
+      }));
     }
   };
+
+  // Storage Event für Chat
+  useEffect(() => {
+    const handleStorage = (e) => {
+      if (e.key === `chat_${sessionId}` && e.newValue) {
+        const newMessages = JSON.parse(e.newValue);
+        setMessages(newMessages);
+      }
+    };
+    
+    window.addEventListener('storage', handleStorage);
+    
+    // Bestehende Nachrichten laden
+    const savedMessages = localStorage.getItem(`chat_${sessionId}`);
+    if (savedMessages) {
+      setMessages(JSON.parse(savedMessages));
+    }
+    
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [sessionId]);
 
   const toggleMute = () => {
     if (stream) {
@@ -177,16 +169,17 @@ export default function VideoChat({ sessionId, username, isHost }) {
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         
-        // Video track ersetzen für alle Peers
-        const videoTrack = screenStream.getVideoTracks()[0];
-        const senders = videoRef.current.srcObject.getSenders();
-        const videoSender = senders.find(sender => sender.track.kind === 'video');
-        videoSender.replaceTrack(videoTrack);
+        if (videoRef.current && videoRef.current.srcObject) {
+          const videoTrack = screenStream.getVideoTracks()[0];
+          const sender = videoRef.current.srcObject.getVideoTracks()[0];
+          videoRef.current.srcObject.removeTrack(sender);
+          videoRef.current.srcObject.addTrack(videoTrack);
+        }
         
         setSharingScreen(true);
         addSystemMessage('📺 Screen Sharing gestartet');
         
-        videoTrack.onended = () => {
+        screenStream.getVideoTracks()[0].onended = () => {
           toggleScreenShare();
         };
       } catch (err) {
@@ -195,12 +188,16 @@ export default function VideoChat({ sessionId, username, isHost }) {
       }
     } else {
       // Zurück zur Kamera
-      const videoTrack = stream.getVideoTracks()[0];
-      const senders = videoRef.current.srcObject.getSenders();
-      const videoSender = senders.find(sender => sender.track.kind === 'video');
-      videoSender.replaceTrack(videoTrack);
-      setSharingScreen(false);
-      addSystemMessage('📺 Screen Sharing beendet');
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(newStream => {
+          const newVideoTrack = newStream.getVideoTracks()[0];
+          const oldStream = videoRef.current.srcObject;
+          const oldVideoTrack = oldStream.getVideoTracks()[0];
+          oldStream.removeTrack(oldVideoTrack);
+          oldStream.addTrack(newVideoTrack);
+          setSharingScreen(false);
+          addSystemMessage('📺 Screen Sharing beendet');
+        });
     }
   };
 
@@ -214,7 +211,9 @@ export default function VideoChat({ sessionId, username, isHost }) {
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
     }
-    socket.disconnect();
+    if (peerRef.current) {
+      peerRef.current.destroy();
+    }
     router.push('/');
   };
 
@@ -230,6 +229,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
             <p style={styles.userInfo}>
               {username} {isHost && <span style={styles.hostBadge}>👑 HOST</span>}
             </p>
+            <p style={styles.peerInfo}>ID: {peerId.slice(-6)}</p>
           </div>
         </div>
         
@@ -279,45 +279,26 @@ export default function VideoChat({ sessionId, username, isHost }) {
                   style={styles.video}
                 />
                 <div style={styles.videoLabel}>
-                  <span>{peer.username || 'Teilnehmer'}</span>
+                  <span>Teilnehmer</span>
                 </div>
               </div>
             ))}
           </div>
           
           <div style={styles.controls}>
-            <button 
-              onClick={toggleMute} 
-              style={styles.controlButton(muted ? '#e74c3c' : '#2ecc71')}
-            >
+            <button onClick={toggleMute} style={styles.controlButton(muted ? '#e74c3c' : '#2ecc71')}>
               {muted ? '🔇' : '🎤'}
             </button>
-            
-            <button 
-              onClick={toggleVideo} 
-              style={styles.controlButton(videoEnabled ? '#2ecc71' : '#e74c3c')}
-            >
+            <button onClick={toggleVideo} style={styles.controlButton(videoEnabled ? '#2ecc71' : '#e74c3c')}>
               {videoEnabled ? '📹' : '📷'}
             </button>
-            
-            <button 
-              onClick={toggleScreenShare} 
-              style={styles.controlButton(sharingScreen ? '#e67e22' : '#3498db')}
-            >
+            <button onClick={toggleScreenShare} style={styles.controlButton(sharingScreen ? '#e67e22' : '#3498db')}>
               🖥️
             </button>
-            
-            <button 
-              onClick={copySessionLink} 
-              style={styles.controlButton('#9b59b6')}
-            >
+            <button onClick={copySessionLink} style={styles.controlButton('#9b59b6')}>
               🔗
             </button>
-            
-            <button 
-              onClick={leaveSession} 
-              style={styles.controlButton('#e74c3c')}
-            >
+            <button onClick={leaveSession} style={styles.controlButton('#e74c3c')}>
               🚪
             </button>
           </div>
@@ -326,15 +307,11 @@ export default function VideoChat({ sessionId, username, isHost }) {
         <div style={styles.sidebar}>
           {showParticipants && (
             <div style={styles.participantsPanel}>
-              <h3 style={styles.panelTitle}>
-                👥 Teilnehmer ({participants.length + 1})
-              </h3>
+              <h3 style={styles.panelTitle}>👥 Teilnehmer ({participants.length + 1})</h3>
               <div style={styles.participantItem}>
                 <div style={styles.participantAvatar}>🎥</div>
                 <div style={styles.participantInfo}>
-                  <span style={styles.participantName}>
-                    {username} {isHost && '👑'}
-                  </span>
+                  <span style={styles.participantName}>{username} {isHost && '👑'}</span>
                   <span style={styles.youBadge}>Du</span>
                 </div>
                 <div style={styles.participantStatus}>
@@ -345,7 +322,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
                 <div key={p.id} style={styles.participantItem}>
                   <div style={styles.participantAvatar}>👤</div>
                   <div style={styles.participantInfo}>
-                    <span style={styles.participantName}>{p.name}</span>
+                    <span style={styles.participantName}>Teilnehmer</span>
                   </div>
                   <div style={styles.participantStatus}>
                     <span style={styles.statusDot}></span>
@@ -356,14 +333,10 @@ export default function VideoChat({ sessionId, username, isHost }) {
           )}
           
           <div style={styles.chatPanel}>
-            <h3 style={styles.panelTitle}>
-              💬 Chat ({messages.length})
-            </h3>
+            <h3 style={styles.panelTitle}>💬 Chat ({messages.length})</h3>
             <div id="chat-messages" style={styles.chatMessages}>
               {messages.length === 0 && (
-                <div style={styles.emptyChat}>
-                  💬 Keine Nachrichten yet
-                </div>
+                <div style={styles.emptyChat}>💬 Keine Nachrichten yet</div>
               )}
               {messages.map(msg => (
                 <div key={msg.id} style={msg.isSystem ? styles.systemMessage : styles.userMessage}>
@@ -384,9 +357,7 @@ export default function VideoChat({ sessionId, username, isHost }) {
                 onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
                 style={styles.input}
               />
-              <button onClick={sendMessage} style={styles.sendButton}>
-                📤
-              </button>
+              <button onClick={sendMessage} style={styles.sendButton}>📤</button>
             </div>
           </div>
         </div>
@@ -440,6 +411,11 @@ const styles = {
     color: '#aaa',
     margin: '5px 0 0',
     fontSize: '14px'
+  },
+  peerInfo: {
+    color: '#48c6ef',
+    fontSize: '10px',
+    margin: '2px 0 0'
   },
   hostBadge: {
     background: 'linear-gradient(135deg, #ffd89b 0%, #c7e9fb 100%)',
